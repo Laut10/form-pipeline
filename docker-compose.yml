@@ -1,0 +1,91 @@
+# ─── Shared Airflow config ────────────────────────────────────────────────────
+x-airflow-common:
+  &airflow-common
+  build: .
+  environment:
+    &airflow-common-env
+    # Airflow internals
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
+    AIRFLOW__CORE__FERNET_KEY: 'ZmDfcTF7_60GrrY167zsiPd67pEvs0aGOv2oasOM1Pg='
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
+    # Make project scripts importable inside the container
+    PYTHONPATH: /opt/airflow/project
+    # Project DB — points to the host machine's PostgreSQL
+    DB_HOST: host.docker.internal
+    DB_PORT: '5432'
+    DB_NAME: form_pipeline
+    DB_USER: postgres
+    DB_PASSWORD: ${DB_PASSWORD}
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./data:/opt/airflow/project/data
+    - ./scripts:/opt/airflow/project/scripts
+    - ./sql:/opt/airflow/project/sql
+    - ./config:/opt/airflow/project/config
+  depends_on:
+    postgres-airflow:
+      condition: service_healthy
+
+# ─── Services ─────────────────────────────────────────────────────────────────
+services:
+
+  # Airflow metadata database (separate from the project DB)
+  postgres-airflow:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_airflow_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+    restart: always
+
+  # One-shot init: runs DB migrations and creates the admin user
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate &&
+        airflow users create \
+          --username admin \
+          --password admin \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@example.com || true
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    restart: always
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: always
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+# ─── Volumes ──────────────────────────────────────────────────────────────────
+volumes:
+  postgres_airflow_data:
