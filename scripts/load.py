@@ -19,8 +19,12 @@ def _create_tables(conn):
 
 
 def _normalize(val):
-    """Convert pandas NaN / float nan to None so psycopg2 writes proper NULLs."""
+    """Convert NaN, NaT, and None to proper SQL NULLs."""
+    if val is None:
+        return None
     if isinstance(val, float) and math.isnan(val):
+        return None
+    if val is pd.NaT:
         return None
     return val
 
@@ -31,11 +35,10 @@ def load(df: pd.DataFrame, db_config: dict) -> int:
 
     records = df.to_dict(orient="records")
     for r in records:
-        # Replace NaN with None and stringify dates
         for k, v in r.items():
             r[k] = _normalize(v)
         if r.get("created_at") is not None:
-            r["created_at"] = str(r["created_at"])
+            r["created_at"] = str(r["created_at"])[:10]  # keep YYYY-MM-DD only
 
     insert_sql = """
         INSERT INTO users_clean (form_id, name, email, country, created_at, source)
