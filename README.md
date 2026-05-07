@@ -222,5 +222,5 @@ PIPELINE METRICS REPORT
 ---
 
 ## Author
-
+Lautaro Arozarena
 Portfolio project — data engineering, ETL pipelines, and workflow orchestration.
